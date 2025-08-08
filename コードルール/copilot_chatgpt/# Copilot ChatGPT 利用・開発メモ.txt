@@ -1,0 +1,30 @@
+# Copilot ChatGPT 利用・開発メモ
+
+## 1. Copilot ChatGPTの使い方
+
+- VS Code拡張機能として利用可能
+- 「修正して」「進めて」などの指示で自動修正・保存が可能（有料プラン推奨）
+- 無料プランやWebチャットではコード提案のみ、手動で貼り付けて保存
+
+## 2. 開発時の注意点
+
+- handlerLoader.jsはcustomId完全一致のみ対応
+- 部分一致（customIdStart）ロジックは廃止
+- buttonsHandler.js、selectsHandler.js、modalsHandler.jsは不要
+- interactionHandler.jsでボタン・セレクト・モーダルを一元管理
+
+## 3. デバッグ・運用メモ
+
+- customId重複や不一致はhandlerLoader.jsの警告ログで確認
+- コマンドプロンプトで文字化けする場合は `chcp 65001` でUTF-8に
+- VS Codeの検索機能やPowerShellのSelect-Stringで参照箇所を特定
+
+## 4. よく使うコマンド
+
+```powershell
+# ファイル内検索（PowerShell）
+Select-String -Path [index.js](http://_vscodecontentref_/0) -Pattern buttonsHandler
+
+# 文字化け対策
+chcp 65001
+node [index.js](http://_vscodecontentref_/1)
