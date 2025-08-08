@@ -1,0 +1,143 @@
+// events/deploy-commands.js - Discord slash commands deployment script
+
+const { REST, Routes } = require('discord.js');
+const fs = require('node:fs');
+const path = require('node:path');
+
+// 環境変数を読み込み
+require('dotenv').config();
+
+const logger = require('../common/logger');
+
+// 環境変数から設定を読み込み
+const clientId = process.env.CLIENT_ID;
+const guildId = process.env.GUILD_ID;
+const token = process.env.DISCORD_TOKEN;
+
+if (!clientId || !token) {
+  logger.error('[deploy-commands] 必要な環境変数が設定されていません。CLIENT_ID と DISCORD_TOKEN を確認してください。');
+  process.exit(1);
+}
+
+const commands = [];
+
+/**
+ * 指定ディレクトリからコマンドファイルを再帰的に収集
+ */
+function collectCommands(dir) {
+  const items = fs.readdirSync(dir);
+  
+  for (const item of items) {
+    const itemPath = path.join(dir, item);
+    const stat = fs.statSync(itemPath);
+    
+    if (stat.isDirectory()) {
+      // サブディレクトリを再帰的に処理
+      collectCommands(itemPath);
+    } else if (item.endsWith('.js') && !item.startsWith('_')) {
+      // JSファイルかつ_で始まらないファイルを処理
+      try {
+        const command = require(itemPath);
+        if (command.data) {
+          commands.push(command.data.toJSON());
+          logger.info(`[deploy-commands] コマンド読み込み: ${command.data.name} (${itemPath})`);
+        } else {
+          logger.warn(`[deploy-commands] data プロパティがありません: ${itemPath}`);
+        }
+      } catch (error) {
+        logger.error(`[deploy-commands] コマンド読み込みエラー: ${itemPath}`, error);
+      }
+    }
+  }
+}
+
+async function deployCommands() {
+  try {
+    logger.info('[deploy-commands] Discord slash commands デプロイ開始');
+    
+    // 各botディレクトリからコマンドを収集
+    const botDirs = [
+      'config_bot',
+      'keihi_bot', 
+      'uriage_bot',
+      'syuttaikin_bot',
+      'hikkake_bot',
+      'level_bot'
+    ];
+    
+    // プロジェクトルートの基準パス
+    const projectRoot = path.join(__dirname, '..');
+    
+    for (const botDir of botDirs) {
+      const commandsDir = path.join(projectRoot, botDir, 'commands');
+      
+      if (fs.existsSync(commandsDir)) {
+        logger.info(`[deploy-commands] ${botDir} からコマンドを収集中...`);
+        collectCommands(commandsDir);
+      } else {
+        logger.warn(`[deploy-commands] コマンドディレクトリが見つかりません: ${commandsDir}`);
+      }
+    }
+    
+    logger.info(`[deploy-commands] 収集されたコマンド数: ${commands.length}`);
+    
+    // 収集されたコマンド一覧を表示
+    commands.forEach(command => {
+      logger.info(`[deploy-commands] - ${command.name}: ${command.description}`);
+    });
+    
+    // REST APIクライアントを初期化
+    const rest = new REST().setToken(token);
+    
+    // コマンドをデプロイ
+    let data;
+    if (guildId) {
+      // ギルド固有のコマンドとしてデプロイ（開発用・高速）
+      logger.info(`[deploy-commands] ギルド固有コマンドとしてデプロイ中... (Guild ID: ${guildId})`);
+      data = await rest.put(
+        Routes.applicationGuildCommands(clientId, guildId),
+        { body: commands }
+      );
+    } else {
+      // グローバルコマンドとしてデプロイ（本番用・時間がかかる）
+      logger.info('[deploy-commands] グローバルコマンドとしてデプロイ中...');
+      data = await rest.put(
+        Routes.applicationCommands(clientId),
+        { body: commands }
+      );
+    }
+    
+    logger.info(`[deploy-commands] ✅ ${data.length}個のslash commandsが正常にデプロイされました。`);
+    
+    // デプロイされたコマンド一覧を表示
+    data.forEach(command => {
+      logger.info(`[deploy-commands] ✓ デプロイ完了: /${command.name}`);
+    });
+    
+  } catch (error) {
+    logger.error('[deploy-commands] ❌ コマンドデプロイ中にエラーが発生しました:', error);
+    
+    // 詳細なエラー情報を表示
+    if (error.code === 50001) {
+      logger.error('[deploy-commands] 権限エラー: botに必要な権限が不足している可能性があります。');
+    } else if (error.code === 50035) {
+      logger.error('[deploy-commands] バリデーションエラー: コマンドの定義に問題があります。');
+      if (error.errors) {
+        logger.error('[deploy-commands] バリデーションエラー詳細:', JSON.stringify(error.errors, null, 2));
+      }
+    } else if (error.code === 401) {
+      logger.error('[deploy-commands] 認証エラー: DISCORD_TOKEN が無効です。');
+    } else if (error.status === 429) {
+      logger.error('[deploy-commands] レート制限エラー: しばらく待ってから再試行してください。');
+    }
+    
+    process.exit(1);
+  }
+}
+
+// メイン実行
+if (require.main === module) {
+  deployCommands();
+}
+
+module.exports = { deployCommands };
